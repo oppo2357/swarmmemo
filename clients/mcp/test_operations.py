@@ -14,6 +14,39 @@ from policy import BridgeError, load_profile
 import operations as op
 
 
+class WorkUSDCAmountTests(unittest.TestCase):
+    def test_mcp_amount_parser_uses_the_shared_discovery_cases(self):
+        fixture = Path(__file__).resolve().parents[2] / "testdata" / "work_usdc_cursor.json"
+        cases = json.loads(fixture.read_text(encoding="utf-8"))
+        positive_units = {"0.02": 20_000, "0.05": 50_000, "0.40": 400_000, "0.000001": 1}
+        zero_amounts = {"0", "0.000000", "0.00"}
+        parsed_positive_ids = set()
+        for work in cases["filterPage"]["data"]["works"]:
+            if not isinstance(work, dict):
+                continue
+            reward = work.get("reward_usdc")
+            standing = work.get("standing")
+            amounts = []
+            if isinstance(reward, dict):
+                amounts.append(reward["amount"])
+            if isinstance(standing, dict):
+                amounts.extend(tier["usdc"] for tier in standing["tiers"] if "usdc" in tier)
+            for amount in amounts:
+                with self.subTest(work=work["id"], amount=amount):
+                    expected = None
+                    if isinstance(amount, str):
+                        expected = 0 if amount in zero_amounts else positive_units.get(amount)
+                    units = op._usdc_units(amount)
+                    self.assertEqual(units, expected)
+                    if units:
+                        parsed_positive_ids.add(work["id"])
+
+        # A void reward can carry a well-formed amount. Only discovery excludes it.
+        void_ids = {work["id"] for work in cases["filterPage"]["data"]["works"]
+                    if isinstance(work, dict) and work.get("reward_usdc", {}).get("state") == "void"}
+        self.assertEqual(parsed_positive_ids, set(cases["filterKeptIds"]) | void_ids)
+
+
 class OperationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="swarmmemo-mcp-ops-"); self.addCleanup(self.temp.cleanup)
